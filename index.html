@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Менеджер задач: загрузка из DummyJSON, поиск, фильтры, профили авторов и локальное сохранение изменений.">
+  <meta name="theme-color" content="#2563eb">
+  <title>Менеджер задач (CRUD + API)</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%232563eb'/%3E%3Cpath d='m10 20 7 7 14-15' fill='none' stroke='white' stroke-width='4'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <main class="container">
+    <header class="page-heading"><h1>Менеджер задач (CRUD + API)</h1><p>Загружайте задачи, следите за выполнением и знакомьтесь с авторами.</p></header>
+    <section class="card loader-card" aria-labelledby="load-title">
+      <h2 id="load-title">Загрузка задач</h2>
+      <form id="api-form" novalidate><label for="api-url">Ссылка на API</label>
+        <div class="api-controls"><input id="api-url" type="url" value="https://dummyjson.com/todos?limit=30" aria-describedby="api-help" spellcheck="false" required><button id="load-button" type="submit" class="button primary">Загрузить задачи ↓</button><button id="preset-button" type="button" class="button secondary">DummyJSON</button></div>
+        <p id="api-help" class="hint">Введите HTTPS-ссылку, которая возвращает задачи, а не API-ключ. Поддерживаются задачи DummyJSON.</p>
+      </form><div id="load-status" class="message" role="status" hidden></div>
+    </section>
+    <div id="storage-status" class="message warning" role="status" hidden></div><div id="app-feedback" class="message" role="status" hidden></div>
+    <section class="stats" aria-label="Статистика загруженных задач"><div class="card stat"><span>Всего</span><strong id="stat-total">0</strong></div><div class="card stat"><span>Выполнено</span><strong id="stat-done" class="green">0</strong></div><div class="card stat"><span>Не выполнено</span><strong id="stat-active" class="orange">0</strong></div></section>
+    <section class="card" aria-labelledby="main-title">
+      <div class="section-heading"><div><h2 id="main-title">Все задачи</h2><p id="main-total" class="subtitle">0 задач</p></div><button id="main-add" type="button" class="button primary" data-add="main" disabled>+ Добавить задачу</button></div>
+      <label class="sr-only" for="task-search">Поиск по тексту задачи</label><input id="task-search" type="search" placeholder="Поиск по тексту задачи…" autocomplete="off">
+      <div class="filters-row"><div class="field"><label for="task-sort">Сортировка</label><select id="task-sort"><option value="none">Без сортировки</option><option value="asc">А–Я</option><option value="desc">Я–А</option></select></div><div class="field author-filter"><label for="author-filter">Автор</label><select id="author-filter"><option value="all">Все авторы</option></select></div><button type="button" id="reset-filters" class="button secondary">Сбросить</button></div>
+      <div id="main-tabs" class="tabs" role="group" aria-label="Статус задач"><button type="button" data-status="all" aria-pressed="true" class="active">Все</button><button type="button" data-status="done" aria-pressed="false">Выполненные</button><button type="button" data-status="active" aria-pressed="false">Не выполненные</button></div>
+      <p id="main-shown" class="shown" role="status">Показано 0 из 0</p><div id="main-state" class="empty-state" role="status">Задачи загружаются…</div><ul id="main-list" class="task-list" aria-label="Все задачи" aria-busy="true"></ul>
+    </section>
+    <section class="card users-card" aria-labelledby="users-title">
+      <div class="section-heading"><div><h2 id="users-title">Пользователи</h2><p class="subtitle">Нажмите на карточку или автора задачи, чтобы открыть профиль.</p></div><span id="users-count" class="badge">0</span></div>
+      <div class="user-controls"><div class="field grow"><label for="user-search">Имя и фамилия</label><input id="user-search" type="search" placeholder="Найти пользователя…" autocomplete="off" disabled></div><div class="field"><label for="user-sort">Сортировка пользователей</label><select id="user-sort" disabled><option value="asc">A–Z</option><option value="desc">Z–A</option></select></div></div>
+      <form id="id-form" class="id-controls" novalidate><div class="field"><label for="user-id">User ID</label><input id="user-id" type="text" inputmode="numeric" placeholder="Например: 5" autocomplete="off" maxlength="16" disabled></div><button id="id-search" type="submit" class="button primary" disabled>Найти</button><button id="clear-users" type="button" class="button secondary">Показать всех</button></form>
+      <p id="users-status" class="message" role="status">Загрузка пользователей…</p><button id="retry-users" type="button" class="button secondary" hidden>Повторить загрузку</button><div id="users-list" class="users-list" aria-label="Пользователи" aria-busy="true"></div>
+    </section>
+    <aside class="api-note"><strong>Как сохраняются изменения?</strong> DummyJSON имитирует запросы и не сохраняет изменения на сервере. Здесь они сохраняются в localStorage этого браузера и восстанавливаются после обновления страницы. Новые задачи затем редактируются и удаляются локально.</aside>
+    <footer><span>HTML · CSS · JavaScript</span><a href="https://dummyjson.com/docs/todos" target="_blank" rel="noopener noreferrer">Документация DummyJSON ↗</a></footer><noscript><p class="message error">Для работы сайта включите JavaScript в браузере.</p></noscript>
+  </main>
+  <!-- Профиль сол жақта, барлық жеке тапсырмалар оң жақта көрсетіледі. -->
+  <dialog id="profile-dialog" class="profile-dialog" aria-labelledby="profile-title">
+    <div class="modal-header"><div class="profile-heading"><button type="button" class="button secondary" data-close>← Назад</button><h2 id="profile-title">Профиль пользователя</h2></div><button type="button" class="close-button" data-close aria-label="Закрыть профиль">×</button></div>
+    <div class="profile-layout"><section class="profile-details" aria-label="Данные пользователя"><div id="profile-info"></div><div id="profile-info-status" class="message" role="status" hidden></div></section>
+      <section class="profile-tasks" aria-labelledby="profile-tasks-title"><div class="section-heading"><h2 id="profile-tasks-title">Задачи пользователя</h2><button id="profile-add" type="button" class="button primary" data-add="profile" disabled>+ Добавить задачу</button></div>
+        <div class="field"><label for="profile-sort">Сортировка</label><select id="profile-sort"><option value="none">Без сортировки</option><option value="asc">А–Я</option><option value="desc">Я–А</option></select></div>
+        <div id="profile-tabs" class="tabs" role="group" aria-label="Статус задач пользователя"><button type="button" data-status="all" class="active" aria-pressed="true">Все</button><button type="button" data-status="done" aria-pressed="false">Выполненные</button><button type="button" data-status="active" aria-pressed="false">Не выполненные</button></div>
+        <div id="profile-feedback" class="message" role="status" hidden></div><p id="profile-shown" class="shown" role="status">Показано 0 из 0</p><div id="profile-task-status" class="empty-state" role="status">Загрузка задач…</div><button id="retry-profile" type="button" class="button secondary" hidden>Повторить загрузку профиля</button><ul id="profile-list" class="task-list" aria-label="Задачи пользователя" aria-busy="false"></ul>
+      </section></div>
+  </dialog>
+  <!-- Қосу мен өңдеу бір пішінді қолданады; ескі мәндер өңдеу кезінде толтырылады. -->
+  <dialog id="editor-dialog" class="editor-dialog" aria-labelledby="editor-title"><form id="editor-form" novalidate>
+    <div class="modal-header"><h2 id="editor-title">Новая задача</h2><button type="button" class="close-button" data-close aria-label="Закрыть окно задачи">×</button></div>
+    <div class="modal-body"><div class="field"><label for="editor-text">Текст задачи</label><textarea id="editor-text" rows="4" maxlength="500" placeholder="Что нужно сделать?" required></textarea></div><div class="field"><label for="editor-author">Автор</label><select id="editor-author" required></select></div><div class="field"><label for="editor-status">Статус</label><select id="editor-status"><option value="active">Не выполнено</option><option value="done">Выполнено</option></select></div>
+      <p id="editor-error" class="message error" role="alert" hidden></p><p class="hint">Изменения сохраняются локально в этом браузере.</p><div class="modal-actions"><button type="button" class="button secondary" data-close>Отмена</button><button id="editor-save" type="submit" class="button primary">Добавить</button></div></div>
+  </form></dialog>
+  <dialog id="delete-dialog" class="editor-dialog" aria-labelledby="delete-title"><div class="modal-header"><h2 id="delete-title">Удалить задачу?</h2><button type="button" class="close-button" data-close aria-label="Закрыть подтверждение">×</button></div><div class="modal-body"><p id="delete-text"></p><p id="delete-error" class="message error" role="alert" hidden></p><div class="modal-actions"><button type="button" class="button secondary" data-close>Отмена</button><button type="button" id="delete-confirm" class="button danger">Удалить</button></div></div></dialog>
+</body>
+</html>
