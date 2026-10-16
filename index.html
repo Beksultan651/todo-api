@@ -3,47 +3,61 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Менеджер задач: загрузка из DummyJSON, поиск, фильтры, профили авторов и локальное сохранение изменений.">
-  <meta name="theme-color" content="#2563eb">
-  <title>Менеджер задач (CRUD + API)</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%232563eb'/%3E%3Cpath d='m10 20 7 7 14-15' fill='none' stroke='white' stroke-width='4'/%3E%3C/svg%3E">
+  <meta name="description" content="TaskFlow — спокойное пространство для задач, командной работы и личного прогресса.">
+  <meta name="theme-color" content="#f7f7fb">
+  <title>TaskFlow — пространство для задач</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='12' fill='%237452d6'/%3E%3Cpath d='m10 20 7 7 14-15' fill='none' stroke='white' stroke-width='4'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="style.css">
   <script src="script.js" defer></script>
 </head>
 <body>
+  <div class="app-shell">
+  <aside class="sidebar" aria-label="Рабочее пространство">
+    <div class="brand"><span class="brand-icon" aria-hidden="true">✓</span><span>TaskFlow<span class="brand-caption">ваш рабочий ритм</span></span></div>
+    <p class="nav-caption">ПРОСТРАНСТВО</p>
+    <nav class="side-nav" aria-label="Навигация"><button type="button" class="nav-link active" data-section="tasks-section" aria-controls="tasks-section" aria-current="page"><span class="nav-icon" aria-hidden="true">▦</span>Задачи<span id="nav-task-count" class="nav-count">0</span></button><button type="button" class="nav-link" data-section="users-section" aria-controls="users-section"><span class="nav-icon" aria-hidden="true">♙</span>Пользователи</button><button type="button" class="nav-link" data-section="api-settings" aria-controls="api-settings"><span class="nav-icon" aria-hidden="true">⌘</span>API баптаулары</button></nav>
+    <div class="sidebar-bottom"><div class="sidebar-note"><span class="tiny-dot"></span> Небольшие шаги.<br><strong>Большие результаты.</strong></div><button type="button" id="theme-toggle" class="theme-toggle" aria-pressed="false" aria-label="Переключить на тёмную тему"><span id="theme-icon" aria-hidden="true">☾</span><span id="theme-label">Тёмная тема</span><span class="theme-switch" aria-hidden="true"><span></span></span></button><span class="sidebar-foot">Создано для ясности.</span></div>
+  </aside>
   <main class="container">
-    <header class="page-heading"><h1>Менеджер задач (CRUD + API)</h1><p>Загружайте задачи, следите за выполнением и знакомьтесь с авторами.</p></header>
-    <section class="card loader-card" aria-labelledby="load-title">
-      <h2 id="load-title">Загрузка задач</h2>
+    <header class="page-heading"><div><p class="eyebrow">ПРОСТРАНСТВО ДЛЯ ВАЖНОГО</p><h1>Мои задачи<span class="heading-dot">.</span></h1><p>Освободите голову. Соберите все дела в одном месте.</p></div><span class="workspace-badge"><span class="tiny-dot"></span> Личное пространство</span></header>
+    <div id="theme-status" class="message warning" role="status" hidden></div>
+    <details id="api-settings" class="card loader-card">
+      <summary><span class="settings-icon" aria-hidden="true">⌘</span><span>API баптаулары<span class="summary-hint">Источник данных и последние запросы</span></span><span class="summary-arrow" aria-hidden="true">⌄</span></summary>
+      <div class="settings-body"><h2 id="load-title" class="sr-only">Загрузка задач</h2>
       <form id="api-form" novalidate><label for="api-url">Ссылка на API</label>
         <div class="api-controls"><input id="api-url" type="url" value="https://dummyjson.com/todos?limit=30" aria-describedby="api-help" spellcheck="false" required><button id="load-button" type="submit" class="button primary">Загрузить задачи ↓</button><button id="preset-button" type="button" class="button secondary">DummyJSON</button></div>
         <p id="api-help" class="hint">Введите HTTPS-ссылку, которая возвращает задачи, а не API-ключ. Поддерживаются задачи DummyJSON.</p>
       </form><div id="load-status" class="message" role="status" hidden></div>
-    </section>
+      <p class="hint">Последний запрос задач: <code id="last-task-url">—</code></p><p class="hint">Последний запрос пользователей: <code id="last-user-url">—</code></p>
+      </div>
+    </details>
     <div id="storage-status" class="message warning" role="status" hidden></div><div id="app-feedback" class="message" role="status" hidden></div>
-    <section class="stats" aria-label="Статистика загруженных задач"><div class="card stat"><span>Всего</span><strong id="stat-total">0</strong></div><div class="card stat"><span>Выполнено</span><strong id="stat-done" class="green">0</strong></div><div class="card stat"><span>Не выполнено</span><strong id="stat-active" class="orange">0</strong></div></section>
-    <section class="card" aria-labelledby="main-title">
+    <section class="stats" aria-label="Статистика загруженных задач"><div class="stat"><span class="stat-dot"></span><strong id="stat-total">0</strong><span>всего задач</span></div><div class="stat"><span class="stat-dot green"></span><strong id="stat-done">0</strong><span>выполнено</span></div><div class="stat"><span class="stat-dot orange"></span><strong id="stat-active">0</strong><span>в процессе</span></div><div class="stat-progress"><span id="completion-label">0% завершено</span><progress id="completion-progress" max="100" value="0" aria-label="Процент выполненных задач"></progress></div></section>
+    <section id="tasks-section" class="card tasks-card" aria-labelledby="main-title">
       <div class="section-heading"><div><h2 id="main-title">Все задачи</h2><p id="main-total" class="subtitle">0 задач</p></div><button id="main-add" type="button" class="button primary" data-add="main" disabled>+ Добавить задачу</button></div>
       <label class="sr-only" for="task-search">Поиск по тексту задачи</label><input id="task-search" type="search" placeholder="Поиск по тексту задачи…" autocomplete="off">
-      <div class="filters-row"><div class="field"><label for="task-sort">Сортировка</label><select id="task-sort"><option value="none">Без сортировки</option><option value="asc">А–Я</option><option value="desc">Я–А</option></select></div><div class="field author-filter"><label for="author-filter">Автор</label><select id="author-filter"><option value="all">Все авторы</option></select></div><button type="button" id="reset-filters" class="button secondary">Сбросить</button></div>
+      <div class="filters-row"><div class="field"><label for="task-sort">Сортировка · API</label><select id="task-sort"><option value="none">Исходный порядок</option><option value="asc">Текст: А–Я</option><option value="desc">Текст: Я–А</option></select></div><div class="field author-filter"><label for="author-filter">Автор</label><select id="author-filter"><option value="all">Все авторы</option></select></div><button type="button" id="reset-filters" class="button secondary">Сбросить</button></div>
+      <div id="sort-status" class="message sort-message" role="status" hidden></div><p class="hint sort-note">Сервер сортирует выборку. Локальные правки объединяются с ней и упорядочиваются в браузере.</p>
       <div id="main-tabs" class="tabs" role="group" aria-label="Статус задач"><button type="button" data-status="all" aria-pressed="true" class="active">Все</button><button type="button" data-status="done" aria-pressed="false">Выполненные</button><button type="button" data-status="active" aria-pressed="false">Не выполненные</button></div>
       <p id="main-shown" class="shown" role="status">Показано 0 из 0</p><div id="main-state" class="empty-state" role="status">Задачи загружаются…</div><ul id="main-list" class="task-list" aria-label="Все задачи" aria-busy="true"></ul>
     </section>
-    <section class="card users-card" aria-labelledby="users-title">
+    <section id="users-section" class="card users-card" aria-labelledby="users-title">
       <div class="section-heading"><div><h2 id="users-title">Пользователи</h2><p class="subtitle">Нажмите на карточку или автора задачи, чтобы открыть профиль.</p></div><span id="users-count" class="badge">0</span></div>
-      <div class="user-controls"><div class="field grow"><label for="user-search">Имя и фамилия</label><input id="user-search" type="search" placeholder="Найти пользователя…" autocomplete="off" disabled></div><div class="field"><label for="user-sort">Сортировка пользователей</label><select id="user-sort" disabled><option value="asc">A–Z</option><option value="desc">Z–A</option></select></div></div>
+      <div class="user-controls"><div class="field grow"><label for="user-search">Имя и фамилия</label><input id="user-search" type="search" placeholder="Найти пользователя…" autocomplete="off" disabled></div><div class="field"><label for="user-sort">Имя · API</label><select id="user-sort" disabled><option value="asc">A–Z</option><option value="desc">Z–A</option></select></div></div><p class="hint">API сортирует по имени, совпадающие имена — по фамилии в браузере.</p>
+      <div id="user-sort-status" class="message" role="status" hidden></div>
       <form id="id-form" class="id-controls" novalidate><div class="field"><label for="user-id">User ID</label><input id="user-id" type="text" inputmode="numeric" placeholder="Например: 5" autocomplete="off" maxlength="16" disabled></div><button id="id-search" type="submit" class="button primary" disabled>Найти</button><button id="clear-users" type="button" class="button secondary">Показать всех</button></form>
       <p id="users-status" class="message" role="status">Загрузка пользователей…</p><button id="retry-users" type="button" class="button secondary" hidden>Повторить загрузку</button><div id="users-list" class="users-list" aria-label="Пользователи" aria-busy="true"></div>
     </section>
     <aside class="api-note"><strong>Как сохраняются изменения?</strong> DummyJSON имитирует запросы и не сохраняет изменения на сервере. Здесь они сохраняются в localStorage этого браузера и восстанавливаются после обновления страницы. Новые задачи затем редактируются и удаляются локально.</aside>
-    <footer><span>HTML · CSS · JavaScript</span><a href="https://dummyjson.com/docs/todos" target="_blank" rel="noopener noreferrer">Документация DummyJSON ↗</a></footer><noscript><p class="message error">Для работы сайта включите JavaScript в браузере.</p></noscript>
+    <footer><span>TaskFlow · Всё по порядку.</span><a href="https://dummyjson.com/docs/todos" target="_blank" rel="noopener noreferrer">Документация DummyJSON ↗</a></footer><noscript><p class="message error">Для работы сайта включите JavaScript в браузере.</p></noscript>
   </main>
+  </div>
   <!-- Профиль сол жақта, барлық жеке тапсырмалар оң жақта көрсетіледі. -->
   <dialog id="profile-dialog" class="profile-dialog" aria-labelledby="profile-title">
     <div class="modal-header"><div class="profile-heading"><button type="button" class="button secondary" data-close>← Назад</button><h2 id="profile-title">Профиль пользователя</h2></div><button type="button" class="close-button" data-close aria-label="Закрыть профиль">×</button></div>
     <div class="profile-layout"><section class="profile-details" aria-label="Данные пользователя"><div id="profile-info"></div><div id="profile-info-status" class="message" role="status" hidden></div></section>
       <section class="profile-tasks" aria-labelledby="profile-tasks-title"><div class="section-heading"><h2 id="profile-tasks-title">Задачи пользователя</h2><button id="profile-add" type="button" class="button primary" data-add="profile" disabled>+ Добавить задачу</button></div>
-        <div class="field"><label for="profile-sort">Сортировка</label><select id="profile-sort"><option value="none">Без сортировки</option><option value="asc">А–Я</option><option value="desc">Я–А</option></select></div>
+        <div class="field"><label for="profile-sort">Текст · API</label><select id="profile-sort"><option value="none">Исходный порядок</option><option value="asc">А–Я</option><option value="desc">Я–А</option></select></div><div id="profile-sort-status" class="message" role="status" hidden></div>
         <div id="profile-tabs" class="tabs" role="group" aria-label="Статус задач пользователя"><button type="button" data-status="all" class="active" aria-pressed="true">Все</button><button type="button" data-status="done" aria-pressed="false">Выполненные</button><button type="button" data-status="active" aria-pressed="false">Не выполненные</button></div>
         <div id="profile-feedback" class="message" role="status" hidden></div><p id="profile-shown" class="shown" role="status">Показано 0 из 0</p><div id="profile-task-status" class="empty-state" role="status">Загрузка задач…</div><button id="retry-profile" type="button" class="button secondary" hidden>Повторить загрузку профиля</button><ul id="profile-list" class="task-list" aria-label="Задачи пользователя" aria-busy="false"></ul>
       </section></div>

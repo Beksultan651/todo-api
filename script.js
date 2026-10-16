@@ -1,6 +1,7 @@
 const API = "https://dummyjson.com";
 const DEFAULT_URL = `${API}/todos?limit=30`;
 const STORAGE_KEY = "is.task-manager.v2";
+const THEME_KEY = "taskflow.theme";
 const HISTORY_KEY = "isCrudRoute";
 const $ = selector => document.querySelector(selector);
 const collator = new Intl.Collator("ru", { sensitivity: "base", numeric: true });
@@ -12,8 +13,34 @@ const state = {
   profileRequests: new Map(), profileErrors: new Map(), mainLoading: false,
   mainFailed: false, mainStatus: "all", profileStatus: "all", userIdFilter: null,
   profileId: null, saving: false, frames: [], historyPending: false, editorId: null,
+  mainRequest: 0, mainQuery: DEFAULT_URL, mainSort: "none", mainWantedUrl: DEFAULT_URL,
+  userRequest: 0, userOrder: [], userAppliedSort: "asc", usersWantedSort: "asc",
+  profileKeys: new Map(), profileSorts: new Map(), profileSequences: new Map(), profileWantedSort: new Map(),
 };
 const dialogs = { profile: $("#profile-dialog"), editor: $("#editor-dialog"), delete: $("#delete-dialog") };
+const systemScheme = window.matchMedia?.("(prefers-color-scheme: dark)");
+let themePreference = null;
+
+// Қолмен таңдалған тақырып болмаса, жүйенің түс параметрін қолданамыз.
+function applyTheme(theme, persist = false) {
+  document.documentElement.dataset.theme = theme;
+  const dark = theme === "dark";
+  $("#theme-icon").textContent = dark ? "☀" : "☾";
+  $("#theme-label").textContent = dark ? "Светлая тема" : "Тёмная тема";
+  $("#theme-toggle").setAttribute("aria-pressed", String(dark));
+  $("#theme-toggle").setAttribute("aria-label", dark ? "Переключить на светлую тему" : "Переключить на тёмную тему");
+  $("meta[name='theme-color']").content = dark ? "#13111b" : "#f7f7fb";
+  if (persist) {
+    themePreference = theme;
+    try { localStorage.setItem(THEME_KEY, theme); message("#theme-status", ""); }
+    catch { message("#theme-status", "Тема изменена, но браузер не разрешил сохранить выбор.", "warning"); }
+  }
+}
+function initTheme() {
+  try { const saved = localStorage.getItem(THEME_KEY); if (["light", "dark"].includes(saved)) themePreference = saved; } catch {}
+  applyTheme(themePreference || (systemScheme?.matches ? "dark" : "light"));
+  systemScheme?.addEventListener?.("change", event => { if (!themePreference) applyTheme(event.matches ? "dark" : "light"); });
+}
 
 function element(tag, className = "", text = "") {
   const node = document.createElement(tag);
@@ -143,48 +170,94 @@ function validatedUrl(value) {
   }
   return url.href;
 }
-async function loadMain() {
-  if (state.mainLoading) return;
+// URLSearchParams сақталған limit/skip параметрлерін жоғалтпай сұрыптауды ауыстырады.
+function taskRequestUrl(value, order) {
+  const url = new URL(validatedUrl(value));
+  url.searchParams.delete("sortBy");
+  url.searchParams.delete("order");
+  if (order !== "none") { url.searchParams.set("sortBy", "todo"); url.searchParams.set("order", order); }
+  return url.href;
+}
+async function loadMain(fromField = false) {
   let url;
-  try { url = validatedUrl($("#api-url").value.trim()); }
-  catch (error) { message("#load-status", error.message, "error"); return; }
+  let order = $("#task-sort").value;
+  try {
+    const source = validatedUrl($("#api-url").value.trim());
+    if (fromField) { const query = new URL(source).searchParams; order = query.get("sortBy") === "todo" ? query.get("order") || "asc" : "none"; $("#task-sort").value = order; }
+    url = taskRequestUrl(source, order);
+  } catch (error) { message("#load-status", error.message, "error"); message("#sort-status", error.message, "error"); $("#api-settings").open = true; return; }
+  const requestNumber = ++state.mainRequest;
+  state.mainWantedUrl = url;
+  $("#api-url").value = url;
+  $("#last-task-url").textContent = url;
   state.mainLoading = true;
   state.mainFailed = false;
   busyText("#load-status", "Загрузка задач…");
+  busyText("#sort-status", `Запрос к API: ${url}`);
   renderAll();
   try {
     const payload = await request(url);
+    if (requestNumber !== state.mainRequest) return;
     const keys = mergeServerTasks(payload);
     state.mainKeys = new Set([...state.changes.keys()].reverse().concat(keys).filter(key => state.tasks.has(key)));
+    state.mainQuery = url;
+    state.mainSort = order;
     message("#load-status", `Загружено ${payload.todos.length} задач${Number.isInteger(payload.total) ? ` из ${payload.total} доступных в API` : ""}. Локальные изменения восстановлены.`, "success");
+    message("#sort-status", `API · ${order === "none" ? "исходный порядок" : order === "asc" ? "А–Я" : "Я–А"} · ${url}`, "success");
   } catch (error) {
+    if (requestNumber !== state.mainRequest) return;
     state.mainFailed = true;
     message("#load-status", error.message, "error");
+    message("#sort-status", `${error.message} Предыдущие задачи сохранены. Запрос: ${url}`, "error");
   } finally {
-    state.mainLoading = false;
-    renderAll();
+    if (requestNumber === state.mainRequest) { state.mainLoading = false; renderAll(); }
   }
 }
 async function loadUsers() {
+  const requestNumber = ++state.userRequest;
+  const order = $("#user-sort").value || "asc";
+  state.usersWantedSort = order;
+  const url = `${API}/users?limit=0&sortBy=firstName&order=${order}`;
+  $("#last-user-url").textContent = url;
   $("#retry-users").hidden = true;
-  busyText("#users-status", "Загрузка пользователей…");
+  if (!state.usersReady) busyText("#users-status", "Загрузка пользователей…");
+  busyText("#user-sort-status", `Сортировка через API… ${url}`);
   $("#users-list").setAttribute("aria-busy", "true");
   try {
-    const payload = await request("/users?limit=0");
+    const payload = await request(url);
+    if (requestNumber !== state.userRequest) return;
     if (!Array.isArray(payload.users) || !payload.users.every(user => Number.isInteger(user.id) &&
       typeof user.firstName === "string" && typeof user.lastName === "string")) throw new Error("Некорректный список пользователей.");
     state.users = new Map(payload.users.map(user => [user.id, user]));
+    state.userOrder = payload.users.map(user => user.id);
+    state.userAppliedSort = order;
     state.usersReady = true;
+    message("#user-sort-status", `API · ${order === "asc" ? "A–Z" : "Z–A"} · ${url}`, "success");
     ["#user-search", "#user-sort", "#user-id", "#id-search"].forEach(id => { $(id).disabled = false; });
     populateAuthors();
     renderUsers();
     renderAll();
   } catch (error) {
-    message("#users-status", error.message, "error");
+    if (requestNumber !== state.userRequest) return;
+    if (!state.usersReady) message("#users-status", error.message, "error");
+    message("#user-sort-status", `${error.message} Запрос: ${url}`, "error");
     $("#retry-users").hidden = false;
-  } finally { $("#users-list").setAttribute("aria-busy", "false"); }
+  } finally { if (requestNumber === state.userRequest) $("#users-list").setAttribute("aria-busy", "false"); }
 }
 function sortedUsers() { return [...state.users.values()].sort((a, b) => collator.compare(name(a), name(b)) || a.id - b.id); }
+function usersInApiOrder() {
+  const users = state.userOrder.map(id => state.users.get(id)).filter(Boolean);
+  const direction = state.userAppliedSort === "desc" ? -1 : 1;
+  // Сервердің негізгі ретін сақтаймыз; тек бірдей есімдердің тектерін жергілікті реттейміз.
+  for (let start = 0; start < users.length;) {
+    let end = start + 1;
+    while (end < users.length && collator.compare(users[start].firstName, users[end].firstName) === 0) end++;
+    const group = users.slice(start, end).sort((a, b) => direction * collator.compare(a.lastName, b.lastName));
+    users.splice(start, end - start, ...group);
+    start = end;
+  }
+  return users;
+}
 function populateAuthors() {
   const filter = $("#author-filter").value;
   const editor = $("#editor-author").value;
@@ -201,8 +274,7 @@ function renderUsers() {
   const list = $("#users-list");
   const scroll = list.scrollTop;
   const query = $("#user-search").value.trim().toLocaleLowerCase("ru");
-  let users = sortedUsers().filter(user => state.userIdFilter !== null ? user.id === state.userIdFilter : name(user).toLocaleLowerCase("ru").includes(query));
-  if ($("#user-sort").value === "desc") users.reverse();
+  const users = usersInApiOrder().filter(user => state.userIdFilter !== null ? user.id === state.userIdFilter : name(user).toLocaleLowerCase("ru").includes(query));
   list.replaceChildren();
   $("#users-count").textContent = state.users.size;
   users.forEach(user => {
@@ -219,13 +291,32 @@ function renderUsers() {
   if (state.usersReady) message("#users-status", users.length ? state.userIdFilter !== null ? "Пользователь найден. Нажмите на карточку." : "" : state.userIdFilter !== null ? `Пользователь с User ID ${state.userIdFilter} не найден.` : "Пользователи не найдены.", users.length ? "" : "error");
 }
 
-function mainTasks() { return [...state.mainKeys].map(key => state.tasks.get(key)).filter(Boolean); }
-function filteredTasks(tasks, status, sort, query = "", author = "all") {
+// Өзгермеген жазбалар API ретін сақтайды. Жергілікті түзетулер ғана сұрыпталып біріктіріледі.
+function mergeLocalOrder(tasks, order) {
+  if (order === "none") return tasks;
+  const direction = order === "desc" ? -1 : 1;
+  const compare = (a, b) => direction * collator.compare(a.todo, b.todo);
+  const server = tasks.filter(task => !state.changes.has(task.key));
+  const changed = tasks.filter(task => state.changes.has(task.key)).sort(compare);
+  const result = [];
+  let i = 0, j = 0;
+  while (i < server.length || j < changed.length) {
+    if (j >= changed.length || (i < server.length && compare(server[i], changed[j]) <= 0)) result.push(server[i++]);
+    else result.push(changed[j++]);
+  }
+  return result;
+}
+function mainTasks() { return mergeLocalOrder([...state.mainKeys].map(key => state.tasks.get(key)).filter(Boolean), state.mainSort); }
+function personalTasks(id) {
+  const keys = new Set(state.profileKeys.get(id) || []);
+  for (const task of state.changes.values()) if (task.userId === id) keys.add(task.key);
+  return mergeLocalOrder([...keys].map(key => state.tasks.get(key)).filter(task => task?.userId === id), state.profileSorts.get(id) || "none");
+}
+function filteredTasks(tasks, status, query = "", author = "all") {
   const text = query.trim().toLocaleLowerCase("ru");
   const result = tasks.filter(task => task.todo.toLocaleLowerCase("ru").includes(text) &&
     (author === "all" || task.userId === Number(author)) &&
     (status === "all" || task.completed === (status === "done")));
-  if (sort !== "none") result.sort((a, b) => (sort === "desc" ? -1 : 1) * collator.compare(a.todo, b.todo));
   return result;
 }
 function taskRow(task, context) {
@@ -275,11 +366,15 @@ function updateTabs(selector, status) {
 }
 function renderMain() {
   const all = mainTasks();
-  const tasks = filteredTasks(all, state.mainStatus, $("#task-sort").value, $("#task-search").value, $("#author-filter").value || "all");
+  const tasks = filteredTasks(all, state.mainStatus, $("#task-search").value, $("#author-filter").value || "all");
   const done = all.filter(task => task.completed).length;
   $("#stat-total").textContent = all.length;
   $("#stat-done").textContent = done;
   $("#stat-active").textContent = all.length - done;
+  $("#nav-task-count").textContent = all.length;
+  const percent = all.length ? Math.round(done / all.length * 100) : 0;
+  $("#completion-progress").value = percent;
+  $("#completion-label").textContent = `${percent}% завершено`;
   $("#main-total").textContent = `${all.length} задач`;
   $("#main-shown").textContent = `Показано ${tasks.length} из ${all.length}`;
   $("#main-state").hidden = tasks.length > 0;
@@ -291,25 +386,40 @@ function renderMain() {
 
 // Профиль әрқашан жеке endpoint-тен толық тапсырмалар тізімін алады.
 async function loadProfile(userId, force = false) {
-  if (state.profileRequests.has(userId)) return state.profileRequests.get(userId);
-  if (!force && state.profiles.has(userId) && state.profileLoaded.has(userId)) return;
+  const order = $("#profile-sort").value || "none";
+  if (!force && state.profileRequests.has(userId)) return state.profileRequests.get(userId);
+  if (!force && state.profiles.has(userId) && state.profileLoaded.has(userId) && state.profileSorts.get(userId) === order && !state.profileErrors.get(userId)?.tasks) {
+    message("#profile-sort-status", `API · ${taskRequestUrl(`${API}/todos/user/${userId}?limit=0`, order)}`, "success");
+    return;
+  }
+  const requestNumber = (state.profileSequences.get(userId) || 0) + 1;
+  state.profileSequences.set(userId, requestNumber);
+  state.profileWantedSort.set(userId, order);
+  const url = taskRequestUrl(`${API}/todos/user/${userId}?limit=0`, order);
+  if (state.profileId === userId) busyText("#profile-sort-status", `Запрос к API: ${url}`);
   const operation = (async () => {
     state.profileErrors.delete(userId);
-    const results = await Promise.allSettled([request(`/users/${userId}`), request(`/todos/user/${userId}?limit=0`)]);
+    const results = await Promise.allSettled([request(`/users/${userId}`), request(url)]);
+    if (requestNumber !== state.profileSequences.get(userId)) return;
     const errors = {};
     if (results[0].status === "fulfilled" && results[0].value?.id === userId) {
       state.profiles.set(userId, results[0].value);
     } else errors.info = results[0].status === "rejected" ? results[0].reason.message : "Некорректные данные профиля.";
     if (results[1].status === "fulfilled") {
-      try { mergeServerTasks(results[1].value, userId); state.profileLoaded.add(userId); }
+      try {
+        state.profileKeys.set(userId, mergeServerTasks(results[1].value, userId));
+        state.profileSorts.set(userId, order);
+        state.profileLoaded.add(userId);
+      }
       catch (error) { errors.tasks = error.message; }
     } else errors.tasks = results[1].reason.message;
     state.profileErrors.set(userId, errors);
+    if (state.profileId === userId) message("#profile-sort-status", errors.tasks ? `${errors.tasks} Предыдущие данные сохранены. ${url}` : `API · ${order === "none" ? "исходный порядок" : order === "asc" ? "А–Я" : "Я–А"} · ${url}`, errors.tasks ? "error" : "success");
   })();
   state.profileRequests.set(userId, operation);
   renderProfile();
   try { await operation; }
-  finally { state.profileRequests.delete(userId); renderAll(); renderProfile(); }
+  finally { if (requestNumber === state.profileSequences.get(userId)) { state.profileRequests.delete(userId); renderAll(); renderProfile(); } }
 }
 function shownValue(value) { return value === undefined || value === null || value === "" ? "Не указано" : String(value); }
 function translated(value, values) { return value ? values[value] || value : "Не указано"; }
@@ -354,8 +464,8 @@ function renderProfileInfo() {
 function renderProfileTasks() {
   if (!state.profileId) return;
   const loaded = state.profileLoaded.has(state.profileId);
-  const all = [...state.tasks.values()].filter(task => task.userId === state.profileId);
-  const tasks = loaded ? filteredTasks(all, state.profileStatus, $("#profile-sort").value) : [];
+  const all = personalTasks(state.profileId);
+  const tasks = loaded ? filteredTasks(all, state.profileStatus) : [];
   $("#profile-shown").textContent = loaded ? `Показано ${tasks.length} из ${all.length}` : "Показано 0 из 0";
   renderTaskList("#profile-list", tasks, "profile");
   const error = state.profileErrors.get(state.profileId)?.tasks;
@@ -385,10 +495,10 @@ function renderAll() { renderMain(); renderProfileTasks(); updateControls(); }
 function topFrame() { return state.frames.at(-1); }
 function captureView() {
   const values = {};
-  ["task-search", "task-sort", "author-filter", "user-search", "user-sort", "user-id", "profile-sort"].forEach(id => { values[id] = $(`#${id}`).value; });
+  ["api-url", "task-search", "task-sort", "author-filter", "user-search", "user-sort", "user-id", "profile-sort"].forEach(id => { values[id] = $(`#${id}`).value; });
   const scrolls = {};
   ["main-list", "users-list", "profile-dialog"].forEach(id => { scrolls[id] = $(`#${id}`).scrollTop; });
-  return { values, scrolls, pageX: window.scrollX, pageY: window.scrollY, mainStatus: state.mainStatus, profileStatus: state.profileStatus, userIdFilter: state.userIdFilter };
+  return { values, scrolls, settingsOpen: $("#api-settings").open, pageX: window.scrollX, pageY: window.scrollY, mainStatus: state.mainStatus, profileStatus: state.profileStatus, userIdFilter: state.userIdFilter };
 }
 function restoreView(view) {
   if (!view) return;
@@ -396,10 +506,25 @@ function restoreView(view) {
   state.mainStatus = view.mainStatus || "all";
   state.profileStatus = view.profileStatus || "all";
   state.userIdFilter = view.userIdFilter ?? null;
+  $("#api-settings").open = Boolean(view.settingsOpen);
   renderAll();
   if (state.usersReady) renderUsers();
   Object.entries(view.scrolls || {}).forEach(([id, value]) => { $(`#${id}`).scrollTop = value; });
   window.scrollTo(view.pageX || 0, view.pageY || 0);
+}
+// Back/Forward кезінде сүзгімен бірге сервердегі сұрыптау да қалпына келеді.
+function syncApiOrder() {
+  try {
+    const wanted = taskRequestUrl($("#api-url").value.trim(), $("#task-sort").value);
+    if (wanted !== (state.mainLoading ? state.mainWantedUrl : state.mainQuery)) loadMain();
+  } catch { /* Қате енгізілген URL тек жүктеу батырмасымен тексеріледі. */ }
+  const userOrder = $("#user-sort").value;
+  const activeUserOrder = $("#users-list").getAttribute("aria-busy") === "true" ? state.usersWantedSort : state.userAppliedSort;
+  if (state.usersReady && userOrder !== activeUserOrder) loadUsers();
+  if (state.profileId) {
+    const activeOrder = state.profileRequests.has(state.profileId) ? state.profileWantedSort.get(state.profileId) : state.profileSorts.get(state.profileId);
+    if (activeOrder !== $("#profile-sort").value || !state.profiles.has(state.profileId)) loadProfile(state.profileId, true);
+  }
 }
 function writeRoute(replace = false) {
   const value = { ...history.state, [HISTORY_KEY]: { frames: state.frames, view: captureView() } };
@@ -430,7 +555,7 @@ function applyFrames(frames, fromHistory = false) {
     if (oldProfile !== profile.userId && !fromHistory) { state.profileStatus = "all"; $("#profile-sort").value = "none"; message("#profile-feedback", ""); }
     renderProfile();
     if (!dialogs.profile.open) dialogs.profile.showModal();
-    loadProfile(profile.userId);
+    if (!fromHistory) loadProfile(profile.userId);
   }
   const editor = frames.find(frame => frame.type === "editor");
   if (editor) {
@@ -479,6 +604,7 @@ function syncRoute() {
     ["profile", "editor", "delete"].includes(frame.type) && (frame.type !== "profile" || Number.isInteger(frame.userId))) : [];
   applyFrames(frames, true);
   restoreView(route?.view);
+  syncApiOrder();
   focusFrame(closed);
 }
 function openProfile(userId) {
@@ -572,17 +698,18 @@ async function deleteTask() {
 }
 
 // Оқиғаларды бір жерде тіркейміз: әр тізімнің жолдары кейін қайта салына алады.
-$("#api-form").addEventListener("submit", event => { event.preventDefault(); loadMain(); });
+$("#api-form").addEventListener("submit", event => { event.preventDefault(); loadMain(true); rememberRoute(); });
 $("#preset-button").addEventListener("click", () => { $("#api-url").value = DEFAULT_URL; $("#api-url").focus(); });
 $("#retry-users").addEventListener("click", loadUsers);
 $("#retry-profile").addEventListener("click", () => loadProfile(state.profileId, true));
 $("#task-search").addEventListener("input", () => { renderMain(); rememberRoute(); });
-["#task-sort", "#author-filter"].forEach(id => $(id).addEventListener("change", () => { renderMain(); rememberRoute(); }));
+$("#task-sort").addEventListener("change", () => { loadMain(); rememberRoute(); });
+$("#author-filter").addEventListener("change", () => { renderMain(); rememberRoute(); });
 $("#reset-filters").addEventListener("click", () => {
   $("#task-search").value = ""; $("#task-sort").value = "none"; $("#author-filter").value = "all"; state.mainStatus = "all";
-  renderAll(); rememberRoute();
+  renderAll(); loadMain(); rememberRoute();
 });
-$("#profile-sort").addEventListener("change", () => { renderProfileTasks(); rememberRoute(); });
+$("#profile-sort").addEventListener("change", () => { if (state.profileId) loadProfile(state.profileId, true); rememberRoute(); });
 [["#main-tabs", "mainStatus"], ["#profile-tabs", "profileStatus"]].forEach(([selector, key]) => {
   $(selector).addEventListener("click", event => {
     const button = event.target.closest("button[data-status]");
@@ -591,7 +718,7 @@ $("#profile-sort").addEventListener("change", () => { renderProfileTasks(); reme
   });
 });
 $("#user-search").addEventListener("input", () => { state.userIdFilter = null; $("#user-id").value = ""; renderUsers(); rememberRoute(); });
-$("#user-sort").addEventListener("change", () => { renderUsers(); rememberRoute(); });
+$("#user-sort").addEventListener("change", () => { loadUsers(); rememberRoute(); });
 $("#id-form").addEventListener("submit", event => {
   event.preventDefault();
   if (!state.usersReady) return;
@@ -626,7 +753,18 @@ Object.entries(dialogs).forEach(([type, dialog]) => dialog.addEventListener("can
   event.preventDefault(); if (topFrame()?.type === type) closeTop();
 }));
 window.addEventListener("popstate", syncRoute);
+$("#theme-toggle").addEventListener("click", () => applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true));
+document.querySelectorAll("[data-section]").forEach(button => button.addEventListener("click", () => {
+  document.querySelectorAll("[data-section]").forEach(link => {
+    link.classList.toggle("active", link === button);
+    if (link === button) link.setAttribute("aria-current", "page"); else link.removeAttribute("aria-current");
+  });
+  const section = document.getElementById(button.dataset.section);
+  if (section.tagName === "DETAILS") section.open = true;
+  section.scrollIntoView({ behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" });
+}));
 
+initTheme();
 readStorage();
 if (!history.state?.[HISTORY_KEY]) writeRoute(true);
 if ("scrollRestoration" in history) history.scrollRestoration = "manual";
